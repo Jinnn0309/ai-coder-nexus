@@ -4,6 +4,7 @@ import { ProcessTemplate, ProcessStage, Comment, User, AppType, UploadedDocument
 import ReactMarkdown from 'react-markdown';
 import { APP_TYPES } from '../constants';
 import { summarizeFeedback, parseProcessTemplate } from '../services/geminiService';
+import { databaseService } from '../services/databaseService';
 
 interface ProcessNavigatorProps {
   data: ProcessTemplate[];
@@ -120,8 +121,41 @@ const ProcessNavigator: React.FC<ProcessNavigatorProps> = ({ data, currentUser, 
          createdAt: Date.now()
      };
 
-     onAdd(template);
-     resetUploadModal();
+     // 保存到数据库
+     const saveTemplate = async () => {
+       try {
+         const response = await databaseService.createTemplate({
+           title: template.title,
+           description: template.description,
+           content: template.templatePreview || '',
+           prompt_content: template.promptContent,
+           input_format: template.inputFormat,
+           output_format: template.outputFormat,
+           stage: template.stage,
+           tech_stack: template.techStack || [],
+           supports: template.supports || [],
+           app_type: template.appType,
+           is_system: template.isSystem,
+           is_public: true,
+           status: 'approved',
+           tags: template.supports || []
+         });
+
+         if (response.success) {
+           onAdd(response.data!);
+           resetUploadModal();
+           // 显示成功消息
+           alert('模板创建成功！');
+         } else {
+           alert(`创建失败: ${response.error}`);
+         }
+       } catch (error) {
+         console.error('Error creating template:', error);
+         alert('创建失败，请稍后重试');
+       }
+     };
+
+     saveTemplate();
   };
 
   const resetUploadModal = () => {

@@ -8,10 +8,12 @@ interface SidebarProps {
   onNavigate: (view: View) => void;
   lang: 'en' | 'zh';
   setLang: (lang: 'en' | 'zh') => void;
+  onLogout: () => void;
+  currentUser: any;
   t: any;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, lang, setLang, t }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, lang, setLang, onLogout, currentUser, t }) => {
   const navItems = [
     { id: View.DASHBOARD, label: t.dashboard, icon: LayoutDashboard },
     { id: View.PROCESS, label: t.processFlow, icon: GitMerge },
@@ -64,10 +66,28 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, lang, setLan
           <Globe className="w-5 h-5" />
           {lang === 'en' ? '中文' : 'English'}
         </button>
-        <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-slate-400 hover:bg-slate-800 transition-colors">
-          <Settings className="w-5 h-5" />
-          {t.settings}
-        </button>
+        {currentUser ? (
+          <div className="space-y-2">
+            <div className="px-3 py-2 text-xs text-slate-500">
+              当前用户: {currentUser.name || currentUser.username}
+            </div>
+            <button 
+              onClick={onLogout}
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-slate-400 hover:bg-slate-800 transition-colors"
+            >
+              <Settings className="w-5 h-5" />
+              退出登录
+            </button>
+          </div>
+        ) : (
+          <button 
+            onClick={onLogout}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-blue-400 hover:bg-slate-800 transition-colors"
+          >
+            <Settings className="w-5 h-5" />
+            登录/注册
+          </button>
+        )}
       </div>
     </div>
   );

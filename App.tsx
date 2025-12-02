@@ -5,53 +5,121 @@ import Playground from './components/Playground';
 import Library from './components/Library';
 import ProcessNavigator from './components/ProcessNavigator';
 import GuideViewer from './components/GuideViewer';
+import AuthModal from './components/AuthModal';
 import { View, ProcessStage, ProcessTemplate, Prompt, User } from './types.js';
 import { 
     MOCK_PROCESS_TEMPLATES_EN, MOCK_PROCESS_TEMPLATES_CN,
     MOCK_PROMPTS_EN, MOCK_PROMPTS_CN,
     MOCK_GUIDES, MOCK_GUIDES_CN,
-    CURRENT_USER, TRANSLATIONS 
+    TRANSLATIONS 
 } from './constants';
+import { authService } from './services/authService';
+import { databaseService } from './services/databaseService';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>(View.DASHBOARD);
   const [lang, setLang] = useState<'en' | 'zh'>('zh'); // Default to Chinese
 
+  // Authentication State
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+
   // Data State
-  const [processTemplates, setProcessTemplates] = useState<ProcessTemplate[]>(MOCK_PROCESS_TEMPLATES_CN);
-  const [prompts, setPrompts] = useState<Prompt[]>(MOCK_PROMPTS_CN);
-  const [currentUser, setCurrentUser] = useState<User>(CURRENT_USER);
+  const [processTemplates, setProcessTemplates] = useState<ProcessTemplate[]>([]);
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
   
   // Navigation State: Process -> Playground
   const [playgroundInitialTemplate, setPlaygroundInitialTemplate] = useState<ProcessTemplate | null>(null);
 
-  // Effect to switch data when language changes
+  // Initialize authentication and data
   useEffect(() => {
-    if (lang === 'zh') {
-        setProcessTemplates(MOCK_PROCESS_TEMPLATES_CN);
-        setPrompts(MOCK_PROMPTS_CN);
+    // 检查用户认证状态
+    const user = authService.getCurrentUser();
+    if (user) {
+      setCurrentUser(user);
     } else {
-        setProcessTemplates(MOCK_PROCESS_TEMPLATES_EN);
-        setPrompts(MOCK_PROMPTS_EN);
+      // 未登录，显示登录模态框
+      setIsAuthModalOpen(true);
     }
-  }, [lang]);
+
+    // 初始化数据库
+    databaseService.initializeDefaultData();
+  }, []);
+
+  // Load data when user changes
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [templatesResponse, promptsResponse, guidesResponse] = await Promise.all([
+          databaseService.getTemplates(),
+          databaseService.getPrompts(),
+          databaseService.getGuides()
+        ]);
+
+        if (templatesResponse.success) {
+          setProcessTemplates(templatesResponse.data || []);
+        }
+        if (promptsResponse.success) {
+          setPrompts(promptsResponse.data || []);
+        }
+      } catch (error) {
+        console.error('Error loading data:', error);
+      }
+    };
+
+    if (currentUser) {
+      loadData();
+    }
+  }, [currentUser]);
 
   const t = TRANSLATIONS[lang];
 
-  // Handlers
-  const handleBookmark = (id: string) => {
-    setCurrentUser(prev => {
-      const isBookmarked = prev.bookmarks.includes(id);
-      return {
-        ...prev,
-        bookmarks: isBookmarked 
-          ? prev.bookmarks.filter(b => b !== id)
-          : [...prev.bookmarks, id]
-      };
-    });
+  // Authentication Handlers
+  const handleAuthSuccess = () => {
+    const user = authService.getCurrentUser();
+    setCurrentUser(user);
+    setIsAuthModalOpen(false);
   };
 
-  const handleAddProcessTemplate = (template: ProcessTemplate) => {
+  const handleLogin = () => {
+    setAuthMode('login');
+    setIsAuthModalOpen(true);
+  };
+
+  const handleLogout = () => {
+    authService.logout();
+    setCurrentUser(null);
+    setProcessTemplates([]);
+    setPrompts([]);
+  };
+
+  // Data Handlers
+  const handleBookmark = async (id: string, resourceType: 'template' | 'prompt' | 'guide') => {
+    if (!currentUser) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+
+    try {
+      await databaseService.toggleBookmark(id, resourceType);
+      // 重新加载数据
+      const templatesResponse = await databaseService.getTemplates();
+      if (templatesResponse.success) {
+        setProcessTemplates(templatesResponse.data || []);
+      }
+    } catch (error) {
+      console.error('Error bookmarking:', error);
+    }
+  };
+
+  const handleAddProcessTemplate = async (template: ProcessTemplate) => {
+    if (!currentUser) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+
+    // 保存到数据库
     setProcessTemplates(prev => [template, ...prev]);
   };
 
@@ -59,8 +127,33 @@ const App: React.FC = () => {
     setProcessTemplates(prev => prev.filter(t => t.id !== id));
   };
 
-  const handleAddPrompt = (prompt: Prompt) => {
-    setPrompts(prev => [prompt, ...prev]);
+  const handleAddPrompt = async (prompt: Prompt) => {
+    if (!currentUser) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+
+    try {
+      const response = await databaseService.createPrompt({
+        title: prompt.title,
+        content: prompt.content,
+        category: prompt.category,
+        scenario: prompt.scenario,
+        role: prompt.role,
+        language: prompt.language,
+        efficiency_score: prompt.efficiencyScore,
+        is_system: prompt.isSystem,
+        is_public: true,
+        status: 'approved',
+        tags: prompt.tags || []
+      });
+
+      if (response.success) {
+        setPrompts(prev => [response.data!, ...prev]);
+      }
+    } catch (error) {
+      console.error('Error creating prompt:', error);
+    }
   };
 
   const handleDeletePrompt = (id: string) => {
@@ -141,7 +234,7 @@ const App: React.FC = () => {
   const renderContent = () => {
     switch (currentView) {
       case View.DASHBOARD:
-        return <Dashboard t={t} />;
+        return <Dashboard t={t} currentUser={currentUser} />;
       case View.PLAYGROUND:
         return (
             <Playground 
@@ -154,14 +247,14 @@ const App: React.FC = () => {
       case View.PROCESS:
         return (
           <ProcessNavigator 
-            data={processTemplates} 
-            currentUser={currentUser}
-            onBookmark={handleBookmark}
-            onAdd={handleAddProcessTemplate}
-            onDelete={handleDeleteProcessTemplate}
-            onRunInPlayground={handleNavigateToPlayground}
-            t={t}
-          />
+                data={processTemplates}
+                currentUser={currentUser || { id: '', name: '', role: 'user', bookmarks: [] }}
+                onBookmark={handleBookmark}
+                onAdd={handleAddProcessTemplate}
+                onDelete={handleDeleteProcessTemplate}
+                onRunInPlayground={handleNavigateToPlayground}
+                t={t}
+              />
         );
       case View.PROMPTS:
         return (
@@ -196,6 +289,17 @@ const App: React.FC = () => {
             {renderContent()}
         </div>
       </main>
+    </div>
+  );
+};
+
+      {/* Authentication Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onAuthSuccess={handleAuthSuccess}
+        initialMode={authMode}
+      />
     </div>
   );
 };
